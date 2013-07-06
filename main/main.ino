@@ -1,17 +1,21 @@
 #include <Wire.h>
 #include <Adafruit_MPL115A2.h>
+#include <EEPROMAnything.h>
 
 Adafruit_MPL115A2 mpl115a2;
 float BASEALTITUDE = 0;
 float altitude;
 float pressureKPA = 0, temperatureC = 0;    
 float static sealevelPressure = 101.325;
-float measurements[5] = {0,0,0,0,0};
 float avg = 0;
-float cum = 0;
+float cumulative = 0;
 float last_val = 0;
+float val = 0;
+
+int state = 1;
+
 int falling_count = 0;
-int armed = 0;
+float next_val = 0;
 
 struct record_altitudes
 { 
@@ -38,11 +42,11 @@ void setup(void)
   for(int i = 0; i < 100; i++)
   {
     float val = get_altitude();
-    cum = val + cum;
+    cumulative = val + cumulative;
   }
 
   
-  BASEALTITUDE = cum/100; 
+  BASEALTITUDE = cumulative/100; 
   Serial.print("Base Altitude is: ");
   Serial.println(BASEALTITUDE);
 }  
@@ -62,64 +66,61 @@ void loop(void)
  //  mpl115a2.getPT(&pressureKPA,&temperatureC);
  // Serial.print("Pressure (kPa): "); Serial.print(pressureKPA, 4); Serial.print(" kPa  ");
  // Serial.print("Temp (*C): "); Serial.print(temperatureC, 1); Serial.println(" *C both measured together");
-  cum = 0;
   
-  for(int i = 0; i < 50; i++)
-  {
-    float val = get_altitude();
-    cum = val + cum;
-  }
-
-  avg = cum/50;
+  val = get_altitude();
+  val = last_val + (1/32)*(val - last_val);
   
   Serial.print("Average is:");
-  Serial.println(avg);
+  Serial.println(val);
+
+switch(state) 
+{
+  case 1:
+    if (val > 500)
+    {
+      state = 2;
+      Serial.println("ARMED");
+    }
+  break;  
   
-  if (avg > 500 && armed == 0)
-  {
-    armed = 1;
-    Serial.println("ARMED");
-  }
-  
-  
-  if (avg < last_val)
-    { 
+  case 2:
+    if (val < last_val)
+    {
       falling_count ++;
-      if (falling_count == 3 && armed == 1)
+      if (falling_count == 3)
       {
        // LAUNCH drogue
         Serial.print("Drogue Launched!");
         Serial.print("time: ");
         Serial.println(millis());
         records.drogue_altitude = altitude;
-        armed = 2;
- 
-        while (true)
-        {
-          delay(10);
-        }
+        state = 3;
       }
-  }
- else
- {
-   falling_count = 0;
+    }
+    else
+    {
+      falling_count = 0;
+    }
+  break;
+  
+ case 3:
+   if (val < 500)
+   {
+     // LAUNCH main    
+     records.main_altitude = altitude;
+     state = 4;
+     Serial.print("Main Launched!");
+     Serial.print("time: ");
+     Serial.println(millis());
+     EEPROM_writeAnything(0,records);
+   }
+   break;
+   
+ case 4:
+   delay(10);
+ break;
  }
-  Serial.print("Falling Count: ");
-  Serial.println(falling_count);
-  last_val = avg;
 
-if (avg < 500 && armed == 2)
-  {
-    // LAUNCH main    
-    records.main_altitude = altitude;
-    armed = 3; 
-    Serial.print("Main Launched!");
-    Serial.print("time: ");
-    Serial.println(millis());
-    EEPROM_writeAnything(0,records);
-  }
+  last_val = val;
 
-
-
- 
 }
