@@ -17,6 +17,9 @@ Adafruit_ADXL345 accel = Adafruit_ADXL345(12345);
 Adafruit_MPL115A2 mpl115a2;
 
 File logfile;
+unsigned long prev_time;  
+float prev_alt, prev_vel, prev_accel;
+
 
 void setup() 
 {
@@ -70,22 +73,61 @@ void setup()
 
   logfile.print("Time "); logfile.print("Xaccel ");
   logfile.print("Yaccel "); logfile.print("Zaccel ");
-  logfile.print("temperature "); logfile.println("pressure ");  
+  logfile.print("Temperature "); logfile.print("Pressure ");  
+  logfile.print("Altitude ");
   logfile.flush();
-  
+
+/* Initializing values for Kalman Filter */
+
+  prev_time = millis(); // need the time to determine the length of the time-step
+  // begin by initialzing prev values
+  float pressureKPA = 0, temperatureC = 0;
+  mpl115a2.getPT(&pressureKPA,&temperatureC);   
+  prev_alt = (pow((pressureKPA/101.325),(1/5.25588)) - 1)/(-.0000225577);  // altitude sensor
+  prev_vel = 0;
+  prev_accel = 0; // acceleration sensor 
+
 }
 
 void loop()
 {
-  float pressureKPA = 0, temperatureC = 0, xAccel = 0, yAccel = 0, zAccel = 0;    
+  float pressureKPA = 0, temperatureC = 0, xAccel = 0, yAccel = 0, zAccel = 0, time_step; 
+  float temp_alt, temp_vel;
   sensors_event_t event; 
-    
+  unsigned long next_time;
+
+  // calculate timestep  
+  next_time = millis();
+  time_step = .001*(next_time-prev_time);
+
+  // propagate state forward in time
+  temp_alt = prev_alt + prev_vel*time_step + prev_accel*.5*time_step^2;
+  temp_vel = prev_vel + prev_accel*time_step;
+  
+  // gets sensor data
+  
   accel.getEvent(&event);
   mpl115a2.getPT(&pressureKPA,&temperatureC); 
+  accel = sqrt(xAccel^2 + yAccel^2 + zAccel^2);
+  alt = (pow((pressure/101.325),(1/5.25588)) - 1)/(-.0000225577);  
+  // corrects estimates with new data
+
+  next_alt = temp_alt + .0330*(alt - temp_alt)
+  next_vel = temp_vel + .0193*(alt - temp_alt) + .0001*(accel - prev_accel); // use this value for your variometer
+  next_accel = prev_accel + .9988*(accel - prev_accel); 
+
+  //prepares for next iteration
+    
+  prev_alt = next_alt;
+  prev_vel = next_vel;
+  prev_accel = next_accel;  
+  prev_time = next_time; 
+    
 
   logfile.print(millis()); logfile.print("  "); logfile.print(event.acceleration.x); logfile.print("  ");
   logfile.print(event.acceleration.y); logfile.print("  "); logfile.print(event.acceleration.z); logfile.print("  ");
-  logfile.print(temperatureC); logfile.print("  "); logfile.println(pressureKPA);  
+  logfile.print(temperatureC); logfile.print("  "); logfile.print(pressureKPA);
+  logfile.println(prev_alt);  
   logfile.flush();
 
 }
